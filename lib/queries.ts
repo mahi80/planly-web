@@ -113,14 +113,50 @@ export function useSearchApplications(filters: SearchFilters) {
   });
 }
 
+// ── Single application (client-side) ───────────────────────────────────
+
+export type ApplicationDetail = ApplicationRow & {
+  proposal?: string | null;
+  applicant_name?: string | null;
+  applicant_address?: string | null;
+  agent_name?: string | null;
+  agent_company_name?: string | null;
+  agent_address?: string | null;
+  agent_email_address?: string | null;
+  ward?: string | null;
+  parish?: string | null;
+  case_officer?: string | null;
+};
+
+export function useApplication(id: string | undefined) {
+  const token = useToken();
+  return useQuery({
+    queryKey: ["application", id],
+    queryFn: async () =>
+      apiFetchAuthed<ApplicationDetail>(
+        `/applications/${encodeURIComponent(id!)}`,
+        token!,
+      ),
+    enabled: Boolean(token && id),
+  });
+}
+
 // ── Saved searches ─────────────────────────────────────────────────────
 
 export type SavedSearch = {
   id: string;
+  user_id: string;
   name: string;
   filters: Record<string, unknown>;
-  notify_on_new_match: boolean;
+  is_default: boolean;
   created_at: string;
+  updated_at: string;
+};
+
+export type SavedSearchCreatePayload = {
+  name: string;
+  filters: Record<string, unknown>;
+  is_default?: boolean;
 };
 
 export function useSavedSearches() {
@@ -128,12 +164,26 @@ export function useSavedSearches() {
   return useQuery({
     queryKey: ["saved_searches"],
     queryFn: async () => {
-      const data = await apiFetchAuthed<
-        { items?: SavedSearch[] } | SavedSearch[]
-      >("/saved_searches/", token!);
-      return Array.isArray(data) ? data : data.items ?? [];
+      const data = await apiFetchAuthed<SavedSearch[]>(
+        "/saved_searches",
+        token!
+      );
+      return data;
     },
     enabled: Boolean(token),
+  });
+}
+
+export function useCreateSavedSearch() {
+  const token = useToken();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (payload: SavedSearchCreatePayload) =>
+      apiFetchAuthed<SavedSearch>("/saved_searches", token!, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["saved_searches"] }),
   });
 }
 
@@ -147,13 +197,166 @@ export function useDeleteSavedSearch() {
   });
 }
 
+// ── Letter templates ───────────────────────────────────────────────────
+// The backend doesn't expose GET /letter-templates yet (templates are
+// managed via the Jinja admin harness). We probe optimistically so the
+// UI lights up automatically once an endpoint is added; until then the
+// 404 surfaces a "templates unavailable" hint and a UUID-entry fallback.
+
+export type LetterTemplate = {
+  id: string;
+  name: string;
+  body?: string | null;
+};
+
+export function useLetterTemplates() {
+  const token = useToken();
+  return useQuery({
+    queryKey: ["letter_templates"],
+    queryFn: async () => {
+      const data = await apiFetchAuthed<
+        LetterTemplate[] | { items?: LetterTemplate[] }
+      >("/letter-templates", token!);
+      return Array.isArray(data) ? data : data.items ?? [];
+    },
+    enabled: Boolean(token),
+    retry: false,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+// ── Letters ────────────────────────────────────────────────────────────
+
+export type LetterStatus =
+  | "draft"
+  | "printed"
+  | "sent"
+  | "delivered"
+  | "bounced";
+
+export type Letter = {
+  id: string;
+  application_id: string;
+  template_id: string;
+  user_id: string;
+  status: LetterStatus;
+  s3_pdf_key?: string | null;
+  follow_up_date?: string | null;
+  printed_at?: string | null;
+  sent_at?: string | null;
+  created_at: string;
+};
+
+export type LetterCreatePayload = {
+  application_id: string;
+  template_id: string;
+  follow_up_date?: string;
+};
+
+export function useLetters() {
+  const token = useToken();
+  return useQuery({
+    queryKey: ["letters"],
+    queryFn: async () => apiFetchAuthed<Letter[]>("/letters", token!),
+    enabled: Boolean(token),
+  });
+}
+
+export function useCreateLetter() {
+  const token = useToken();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (payload: LetterCreatePayload) =>
+      apiFetchAuthed<Letter>("/letters", token!, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["letters"] });
+      // Creating a letter auto-creates a lead_tracking row, so the kanban
+      // needs to refetch too.
+      qc.invalidateQueries({ queryKey: ["leads"] });
+    },
+  });
+}
+
 // ── Leads ──────────────────────────────────────────────────────────────
+
+export type LeadStage = "new" | "contacted" | "follow_up" | "won" | "lost";
+
+export type Lead = {
+  id: string;
+  user_id: string;
+  application: ApplicationRow & {
+    proposal?: string | null;
+    applicant_name?: string | null;
+    agent_name?: string | null;
+    agent_email_address?: string | null;
+  };
+  stage: LeadStage;
+  position: number;
+  last_contact_at?: string | null;
+  created_at: string;
+  updated_at: string;
+  note_count: number;
+};
+
+export type KanbanColumn = { stage: LeadStage; leads: Lead[] };
+export type KanbanResponse = { columns: KanbanColumn[] };
 
 export function useLeadsKanban() {
   const token = useToken();
   return useQuery({
     queryKey: ["leads", "kanban"],
-    queryFn: async () => apiFetchAuthed("/leads/kanban", token!),
+    queryFn: async () =>
+      apiFetchAuthed<KanbanResponse>("/leads/kanban", token!),
     enabled: Boolean(token),
+  });
+}
+
+export type LeadUpdatePayload = {
+  stage?: LeadStage;
+  position?: number;
+  last_contact_at?: string;
+  note?: string;
+};
+
+export function useUpdateLead() {
+  const token = useToken();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      id,
+      payload,
+    }: {
+      id: string;
+      payload: LeadUpdatePayload;
+    }) =>
+      apiFetchAuthed<Lead>(`/leads/${id}`, token!, {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+      }),
+    onSuccess: (_data, variables) => {
+      qc.invalidateQueries({ queryKey: ["leads", "kanban"] });
+      qc.invalidateQueries({ queryKey: ["lead", variables.id] });
+      qc.invalidateQueries({ queryKey: ["lead_notes", variables.id] });
+    },
+  });
+}
+
+export type LeadNote = {
+  id: string;
+  user_id: string;
+  note: string;
+  created_at: string;
+};
+
+export function useLeadNotes(leadId: string | undefined) {
+  const token = useToken();
+  return useQuery({
+    queryKey: ["lead_notes", leadId],
+    queryFn: async () =>
+      apiFetchAuthed<LeadNote[]>(`/leads/${leadId}/notes`, token!),
+    enabled: Boolean(token && leadId),
   });
 }
