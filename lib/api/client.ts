@@ -1,15 +1,32 @@
 /**
- * Minimal authenticated fetch wrapper.
+ * API client — two layers:
  *
- * NOTE: We had openapi-fetch + a generated `paths` type but the OpenAPI
- * regen against the local FastAPI only captured 5 of the 30+ routes. Likely
- * fixable (re-run `npm run gen:api` once the backend exports all routers
- * in the OpenAPI spec correctly), but we're using plain fetch() in the
- * meantime so the customer-app team can polish the type-safety angle later
- * without blocking on it.
+ * 1. `apiClient` — typed openapi-fetch client built from the generated
+ *    `paths` interface in `./types`. Use `apiClient.GET(...)` etc. for
+ *    full request/response type-safety on all 21 API routes.
+ *
+ * 2. `apiFetchAuthed` / `apiFetch` — plain fetch wrappers used by the
+ *    existing TanStack Query hooks. These are kept for backward-compat;
+ *    new hooks should prefer `apiClient`.
+ *
+ * Types regenerated via `npm run gen:api` (openapi-typescript v7 against
+ * the FastAPI app at api.main:app — 21 routes as of 2026-05-22).
  */
+import createClient from "openapi-fetch";
+import type { paths } from "./types";
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+/**
+ * Typed openapi-fetch client. Request/response bodies are fully typed via
+ * the generated `paths` interface. Prefer this over `apiFetchAuthed` for
+ * new hooks; set the `Authorization` header per-call:
+ *
+ *   const { data, error } = await apiClient.GET("/councils", {
+ *     headers: { Authorization: `Bearer ${token}` },
+ *   });
+ */
+export const apiClient = createClient<paths>({ baseUrl: BASE_URL });
 
 export type ApiError = {
   status: number;

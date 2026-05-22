@@ -4,33 +4,20 @@
  */
 
 export interface paths {
-    "/login": {
+    "/health": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** Login Page */
-        get: operations["login_page_login_get"];
-        put?: never;
-        /** Login Submit */
-        post: operations["login_submit_login_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/logout": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Logout */
-        get: operations["logout_logout_get"];
+        /**
+         * Health
+         * @description Liveness probe. AWS ALB target-group health check + UI dev's
+         *     'is the API up?' indicator. Cheap — no DB hit. Returns version
+         *     so deploy verification can sanity-check which build is running.
+         */
+        get: operations["health_health_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -39,24 +26,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Index */
-        get: operations["index__get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/query": {
+    "/auth/login": {
         parameters: {
             query?: never;
             header?: never;
@@ -65,23 +35,508 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Handle Query */
-        post: operations["handle_query_query_post"];
+        /**
+         * Login
+         * @description Exchange email + password for an access + refresh token pair.
+         *
+         *     Returns 401 on any of:
+         *     - email not found
+         *     - password mismatch
+         *     - user.is_active = False
+         *
+         *     Updates users.last_login_at + creates a refresh_tokens row recording
+         *     the user_agent and (optional) IP for audit / forced-logout-per-session.
+         */
+        post: operations["login_auth_login_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/health": {
+    "/auth/refresh": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** Health */
-        get: operations["health_health_get"];
+        get?: never;
+        put?: never;
+        /**
+         * Refresh
+         * @description Exchange a valid refresh token for a new access token.
+         *
+         *     Refresh tokens are NOT rotated by this endpoint to keep the UI dev's
+         *     integration simple — the refresh token continues to be valid until
+         *     its original 7-day expiry. (Rotation can be added in a follow-up
+         *     when we're ready to do the dance with the UI.)
+         *
+         *     Returns 401 if:
+         *     - JWT signature invalid / expired
+         *     - refresh_tokens row not found, revoked, or user deactivated
+         */
+        post: operations["refresh_auth_refresh_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/logout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Logout
+         * @description Revoke the presented refresh token. Idempotent — calling twice
+         *     with the same token is fine (second call is a no-op).
+         *
+         *     Note: the *access* token isn't revocable here (it's stateless and
+         *     expires in 15 min). For immediate access-level revocation we'd need
+         *     a JTI denylist — out of scope for v1.
+         */
+        post: operations["logout_auth_logout_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Me
+         * @description Returns the current user + their tenant. Used by the UI to:
+         *     - Render user-name in the navbar
+         *     - Decide which routes to show (tenant_admin sees the admin nav)
+         *     - Detect post-deploy session invalidation (server-side this endpoint
+         *       is the simplest way to confirm the bearer token is still alive)
+         */
+        get: operations["me_auth_me_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/councils": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Councils
+         * @description List councils with optional region / adapter_type / is_active filters.
+         *
+         *     Default page is 200 and max is 500 — the UI usually wants the full
+         *     394-row registry to populate the filter dropdown in one request.
+         */
+        get: operations["list_councils_councils_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/applications/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Search Applications
+         * @description Filter planning applications by council, status, date range, postcode prefix,
+         *     and optional full-text search on description.
+         *
+         *     When `q` is provided the GIN index `pa_description_fts_idx` is used and
+         *     results are ranked by `ts_rank` (highest first), then `received_date DESC`
+         *     as a stable tiebreak. Without `q` the existing chronological order applies.
+         */
+        get: operations["search_applications_applications_search_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/applications/{application_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Application
+         * @description Fetch a single planning application by UUID — full record including
+         *     every normalised column plus raw_data JSONB.
+         *
+         *     Returns 404 if the application_id is unknown.
+         */
+        get: operations["get_application_applications__application_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/saved_searches": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Saved Searches
+         * @description List the caller's tenant's saved searches.
+         *
+         *     RLS auto-filters to the caller's tenant — no WHERE clause needed.
+         *     Ordering: defaults first, then by name (ascending). UI typically
+         *     renders these as a small left-nav list, not paginated.
+         */
+        get: operations["list_saved_searches_saved_searches_get"];
+        put?: never;
+        /**
+         * Create Saved Search
+         * @description Create a new saved search bound to the caller's tenant + user.
+         *
+         *     Server fills tenant_id from the JWT (the client never sets it). The
+         *     RLS WITH CHECK policy rejects any attempt to set a tenant_id that
+         *     doesn't match `app.tenant_id`, so a bug or compromised client cannot
+         *     plant rows in another tenant.
+         */
+        post: operations["create_saved_search_saved_searches_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/saved_searches/{saved_search_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Saved Search
+         * @description Fetch one saved search by id. RLS makes other tenants' rows
+         *     invisible — they manifest as 404, not 403, so we don't leak
+         *     existence.
+         */
+        get: operations["get_saved_search_saved_searches__saved_search_id__get"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete Saved Search
+         * @description Delete one saved search. 404 if unknown (or hidden by RLS).
+         *     Returns 204 No Content on success.
+         */
+        delete: operations["delete_saved_search_saved_searches__saved_search_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Update Saved Search
+         * @description Partial update — only fields present in the body are touched.
+         *     404 if the id is unknown (or owned by another tenant — RLS makes
+         *     it indistinguishable, which is the desired behaviour).
+         */
+        patch: operations["update_saved_search_saved_searches__saved_search_id__patch"];
+        trace?: never;
+    };
+    "/letters": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Letters
+         * @description List the caller's tenant's letters, newest first.
+         *
+         *     Tenant-scoped via RLS — no WHERE clause needed. Returns every letter
+         *     regardless of creating user (the UI may filter client-side by user
+         *     for personal vs team views).
+         */
+        get: operations["list_letters_letters_get"];
+        put?: never;
+        /**
+         * Create Letter
+         * @description Create a draft letter for an application + template combo.
+         *
+         *     Side effect: also upserts a LeadTracking row (stage=new) for this
+         *     (tenant, application) pair if one doesn't already exist — so the
+         *     kanban surfaces the lead immediately.
+         *
+         *     422 if the template doesn't exist in this tenant (RLS hides cross-tenant
+         *     rows, so this is indistinguishable from "missing"). 404 if the
+         *     application doesn't exist at all (planning_applications is global, not
+         *     tenant-scoped, so we check existence directly).
+         */
+        post: operations["create_letter_letters_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/letter-templates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Letter Templates
+         * @description List all letter templates for the caller's tenant, alphabetically.
+         *
+         *     Tenant-scoped via RLS — no WHERE clause needed. Returns templates
+         *     ordered by name so the TemplateSelect dropdown is predictably sorted.
+         */
+        get: operations["list_letter_templates_letter_templates_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/leads/kanban": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Kanban
+         * @description Return all 5 stage columns with their leads, ordered by position.
+         *
+         *     RLS auto-filters to the caller's tenant — no WHERE clause needed.
+         *     The application + its council are eager-loaded so each card has the
+         *     site address + ref number + status without N+1 queries.
+         */
+        get: operations["get_kanban_leads_kanban_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/leads/{lead_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Lead
+         * @description Partial update — only fields present in the body are touched.
+         *
+         *     If `note` is set, a LeadNote row is inserted in the same transaction
+         *     (the note count comes back in the response).
+         *
+         *     404 if the lead_id is unknown or owned by another tenant (RLS hides
+         *     it the same way).
+         */
+        patch: operations["update_lead_leads__lead_id__patch"];
+        trace?: never;
+    };
+    "/leads/{lead_id}/notes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Lead Notes
+         * @description List notes for a lead in chronological order.
+         *
+         *     RLS on lead_notes uses a subquery against lead_tracking, so other
+         *     tenants' notes are invisible. 404 if the lead itself is unknown.
+         */
+        get: operations["list_lead_notes_leads__lead_id__notes_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/scrape-schedules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Scrape Schedules
+         * @description Return all 4 tier schedules in tier display order.
+         */
+        get: operations["list_scrape_schedules_admin_scrape_schedules_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/scrape-schedules/{tier}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Scrape Schedule */
+        get: operations["get_scrape_schedule_admin_scrape_schedules__tier__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Scrape Schedule
+         * @description Partial update. Only the fields present in the body are touched.
+         *
+         *     Cron expression structural validity is enforced by ScrapeScheduleUpdate.
+         *     Setting `enabled=false` causes scripts/install_cron.py to emit a
+         *     `# DISABLED` comment in /etc/cron.d/planly-scraper at next apply —
+         *     the existing entry continues until the file is regenerated.
+         */
+        patch: operations["update_scrape_schedule_admin_scrape_schedules__tier__patch"];
+        trace?: never;
+    };
+    "/admin/councils": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Councils Admin
+         * @description Admin-fat council list with scrape-health columns. Same shape as
+         *     GET /councils but adds the last_scrape_* telemetry per row + accepts
+         *     a tier filter.
+         */
+        get: operations["list_councils_admin_admin_councils_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/councils/{council_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Council Tier
+         * @description Move one council to a different scrape_frequency tier.
+         *
+         *     Effect is immediate — the next cron run for the new tier will include
+         *     this council; the next run for the old tier no longer will. No
+         *     install_cron.py rerun needed (it only manages the cron expressions,
+         *     not the membership).
+         */
+        patch: operations["update_council_tier_admin_councils__council_id__patch"];
+        trace?: never;
+    };
+    "/admin/councils/reseed-tiers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reseed Tiers
+         * @description Re-run the volume-rank heuristic over every council.
+         *
+         *     Reuses scripts/seed_scrape_tiers.py:assign_tiers which is a pure
+         *     function. dry_run=true (default) returns the diff without writing;
+         *     dry_run=false applies it in the current request transaction.
+         */
+        post: operations["reseed_tiers_admin_councils_reseed_tiers_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/scrape-health": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Scrape Health
+         * @description Per-tier health snapshot — computed on demand from scrape_schedules
+         *     + scrape_logs. A tier is `is_stale` when no successful run inside
+         *     2× its baseline cadence. Disabled tiers are never flagged stale.
+         *
+         *     Same computation lives in scripts/check_scrape_health.py, which runs
+         *     via cron every 30 minutes and emits a structured WARNING per stale
+         *     tier — operators wire that to their log aggregator for delivery.
+         */
+        get: operations["get_scrape_health_admin_scrape_health_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -94,22 +549,780 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
-        /** Body_handle_query_query_post */
-        Body_handle_query_query_post: {
-            /** Query */
-            query: string;
+        /**
+         * AccessTokenOut
+         * @description Returned by /auth/refresh — only the access token is rotated;
+         *     the refresh token continues until its original expiry.
+         */
+        AccessTokenOut: {
+            /** Access Token */
+            access_token: string;
+            /**
+             * Token Type
+             * @default bearer
+             */
+            token_type: string;
+            /** Expires In */
+            expires_in: number;
         };
-        /** Body_login_submit_login_post */
-        Body_login_submit_login_post: {
-            /** Username */
-            username: string;
-            /** Password */
-            password: string;
+        /**
+         * ApplicationDetail
+         * @description Full planning-application record as returned by GET /applications/{id}.
+         *
+         *     Superset of ApplicationOut: every column on planning_applications plus
+         *     raw_data JSONB (council-specific fields not normalised into columns).
+         */
+        ApplicationDetail: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            council: components["schemas"]["CouncilRef"];
+            /** Reference Number */
+            reference_number: string;
+            /** Alternative Reference */
+            alternative_reference?: string | null;
+            /** Site Address */
+            site_address?: string | null;
+            /** Applicant Postcode */
+            applicant_postcode?: string | null;
+            /** Description */
+            description?: string | null;
+            /** Proposal */
+            proposal?: string | null;
+            /** Applicant Name */
+            applicant_name?: string | null;
+            /** Applicant Address */
+            applicant_address?: string | null;
+            /** Agent Name */
+            agent_name?: string | null;
+            /** Agent Company Name */
+            agent_company_name?: string | null;
+            /** Agent Address */
+            agent_address?: string | null;
+            /** Agent Email Address */
+            agent_email_address?: string | null;
+            status_canonical?: components["schemas"]["StatusEnum"] | null;
+            /** Status Raw */
+            status_raw?: string | null;
+            /** Actual Decision Level */
+            actual_decision_level?: string | null;
+            /** Appeal Status */
+            appeal_status?: string | null;
+            /** Received Date */
+            received_date?: string | null;
+            /** Validated Date */
+            validated_date?: string | null;
+            /** Decision Made Date */
+            decision_made_date?: string | null;
+            /** Decision Issued Date */
+            decision_issued_date?: string | null;
+            /** Decision Date */
+            decision_date?: string | null;
+            /** Status Date */
+            status_date?: string | null;
+            /** Updated Date */
+            updated_date?: string | null;
+            /** Expiry Date */
+            expiry_date?: string | null;
+            /** Internal Target Date */
+            internal_target_date?: string | null;
+            /** Neighbour Consultation Expiry */
+            neighbour_consultation_expiry?: string | null;
+            /** Standard Consultation Expiry */
+            standard_consultation_expiry?: string | null;
+            /** Application Type */
+            application_type?: string | null;
+            /** Case Officer */
+            case_officer?: string | null;
+            /** Ward */
+            ward?: string | null;
+            /** Parish */
+            parish?: string | null;
+            /** Environmental Assessment Requested */
+            environmental_assessment_requested?: boolean | null;
+            /** Is Tpo */
+            is_tpo: boolean;
+            /** Detail Url */
+            detail_url?: string | null;
+            data_source: components["schemas"]["DataSourceEnum"];
+            /** Raw Data */
+            raw_data: {
+                [key: string]: unknown;
+            };
+            /** Pending Kyc Enrichment */
+            pending_kyc_enrichment: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Former District */
+            former_district?: string | null;
+            /** Former District Confidence */
+            former_district_confidence?: string | null;
         };
+        /**
+         * ApplicationOut
+         * @description Single planning-application row as returned by /applications/search.
+         */
+        ApplicationOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            council: components["schemas"]["CouncilRef"];
+            /** Reference Number */
+            reference_number: string;
+            /** Site Address */
+            site_address?: string | null;
+            /** Description */
+            description?: string | null;
+            status_canonical?: components["schemas"]["StatusEnum"] | null;
+            /** Status Raw */
+            status_raw?: string | null;
+            /** Received Date */
+            received_date?: string | null;
+            /** Decision Date */
+            decision_date?: string | null;
+            /** Applicant Postcode */
+            applicant_postcode?: string | null;
+            /** Application Type */
+            application_type?: string | null;
+            /** Detail Url */
+            detail_url?: string | null;
+            /** Former District */
+            former_district?: string | null;
+            /** Former District Confidence */
+            former_district_confidence?: string | null;
+        };
+        /**
+         * CouncilAdminOut
+         * @description Admin-fat council view — superset of the public CouncilOut. Adds
+         *     every column an operator needs to triage scrape health.
+         */
+        CouncilAdminOut: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Region */
+            region?: string | null;
+            /** Sub Region */
+            sub_region?: string | null;
+            /** Adapter Type */
+            adapter_type?: string | null;
+            /** Is Active */
+            is_active: boolean;
+            /** Received Apps Count */
+            received_apps_count: number;
+            /** Decided Apps Count */
+            decided_apps_count: number;
+            /** Customer Count */
+            customer_count: number;
+            scrape_frequency: components["schemas"]["ScrapeFrequency"];
+            /** Last Scrape Started At */
+            last_scrape_started_at?: string | null;
+            /** Last Scraped At */
+            last_scraped_at?: string | null;
+            last_scrape_status?: components["schemas"]["ScrapeStatus"] | null;
+            /** Last Scrape Cost Usd */
+            last_scrape_cost_usd?: string | null;
+        };
+        /**
+         * CouncilOut
+         * @description Public council view for the UI's filter dropdown + listing pages.
+         */
+        CouncilOut: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Region */
+            region?: string | null;
+            /** Sub Region */
+            sub_region?: string | null;
+            /** Adapter Type */
+            adapter_type?: string | null;
+            /** Is Active */
+            is_active: boolean;
+            /** Received Apps Count */
+            received_apps_count: number;
+            /** Last Scraped At */
+            last_scraped_at?: string | null;
+        };
+        /**
+         * CouncilRef
+         * @description Compact council reference embedded in ApplicationOut / ApplicationDetail.
+         */
+        CouncilRef: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+        };
+        /**
+         * CouncilTierUpdate
+         * @description PATCH /admin/councils/{id} body. Only the tier field is mutable
+         *     in this PR — other admin edits (rename, deactivate) will land
+         *     separately as we discover the need.
+         */
+        CouncilTierUpdate: {
+            scrape_frequency: components["schemas"]["ScrapeFrequency"];
+        };
+        /**
+         * DataSourceEnum
+         * @enum {string}
+         */
+        DataSourceEnum: "council_portal" | "planit_org_uk" | "manual";
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /**
+         * HealthReportOut
+         * @description GET /admin/scrape-health envelope.
+         */
+        HealthReportOut: {
+            /**
+             * Generated At
+             * Format: date-time
+             */
+            generated_at: string;
+            /** Tiers */
+            tiers: components["schemas"]["TierHealthOut"][];
+            /**
+             * Stale Count
+             * @description Tiers with is_stale=True.
+             */
+            stale_count: number;
+        };
+        /**
+         * KanbanColumn
+         * @description One column of the kanban board (one LeadStage).
+         */
+        KanbanColumn: {
+            stage: components["schemas"]["LeadStage"];
+            /** Leads */
+            leads: components["schemas"]["LeadOut"][];
+        };
+        /**
+         * KanbanResponse
+         * @description Full kanban view — all 5 stages in display order.
+         */
+        KanbanResponse: {
+            /** Columns */
+            columns: components["schemas"]["KanbanColumn"][];
+        };
+        /**
+         * LeadNoteOut
+         * @description One free-text note attached to a lead card.
+         */
+        LeadNoteOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * User Id
+             * Format: uuid
+             */
+            user_id: string;
+            /** Note */
+            note: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /**
+         * LeadOut
+         * @description Single kanban card — application context + stage + position.
+         */
+        LeadOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * User Id
+             * Format: uuid
+             */
+            user_id: string;
+            application: components["schemas"]["ApplicationOut"];
+            stage: components["schemas"]["LeadStage"];
+            /** Position */
+            position: number;
+            /** Last Contact At */
+            last_contact_at?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /**
+             * Note Count
+             * @default 0
+             */
+            note_count: number;
+        };
+        /**
+         * LeadStage
+         * @enum {string}
+         */
+        LeadStage: "new" | "contacted" | "follow_up" | "won" | "lost";
+        /**
+         * LeadUpdate
+         * @description PATCH /leads/{id} body — every field optional. If `note` is set,
+         *     a LeadNote row is also inserted in the same transaction.
+         */
+        LeadUpdate: {
+            stage?: components["schemas"]["LeadStage"] | null;
+            /** Position */
+            position?: number | null;
+            /** Last Contact At */
+            last_contact_at?: string | null;
+            /** Note */
+            note?: string | null;
+        };
+        /**
+         * LetterCreate
+         * @description POST /letters body. application_id + template_id are required;
+         *     both must belong to the caller's tenant or RLS rejects the insert.
+         */
+        LetterCreate: {
+            /**
+             * Application Id
+             * Format: uuid
+             */
+            application_id: string;
+            /**
+             * Template Id
+             * Format: uuid
+             */
+            template_id: string;
+            /** Follow Up Date */
+            follow_up_date?: string | null;
+        };
+        /**
+         * LetterOut
+         * @description Single letter row as returned by /letters list + /letters/{id}.
+         */
+        LetterOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Application Id
+             * Format: uuid
+             */
+            application_id: string;
+            /**
+             * Template Id
+             * Format: uuid
+             */
+            template_id: string;
+            /**
+             * User Id
+             * Format: uuid
+             */
+            user_id: string;
+            status: components["schemas"]["LetterStatus"];
+            /** S3 Pdf Key */
+            s3_pdf_key?: string | null;
+            /** Follow Up Date */
+            follow_up_date?: string | null;
+            /** Printed At */
+            printed_at?: string | null;
+            /** Sent At */
+            sent_at?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /**
+         * LetterStatus
+         * @enum {string}
+         */
+        LetterStatus: "draft" | "printed" | "sent" | "delivered" | "bounced";
+        /**
+         * LetterTemplateOut
+         * @description Single letter-template row as returned by GET /letter-templates.
+         */
+        LetterTemplateOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /** Body Html */
+            body_html: string;
+            /**
+             * Merge Fields
+             * @default []
+             */
+            merge_fields: string[];
+            /** Is Default */
+            is_default: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** LoginRequest */
+        LoginRequest: {
+            /**
+             * Email
+             * Format: email
+             */
+            email: string;
+            /** Password */
+            password: string;
+        };
+        /**
+         * MeResponse
+         * @description GET /auth/me response — current user + their tenant.
+         */
+        MeResponse: {
+            user: components["schemas"]["UserOut"];
+            /** Tenant Name */
+            tenant_name: string;
+            /** Tenant Slug */
+            tenant_slug: string;
+        };
+        /** PaginatedResponse[ApplicationOut] */
+        PaginatedResponse_ApplicationOut_: {
+            /** Items */
+            items: components["schemas"]["ApplicationOut"][];
+            /**
+             * Total
+             * @description Total matching rows, ignoring skip/limit
+             */
+            total: number;
+            /** Skip */
+            skip: number;
+            /** Limit */
+            limit: number;
+        };
+        /** PaginatedResponse[CouncilAdminOut] */
+        PaginatedResponse_CouncilAdminOut_: {
+            /** Items */
+            items: components["schemas"]["CouncilAdminOut"][];
+            /**
+             * Total
+             * @description Total matching rows, ignoring skip/limit
+             */
+            total: number;
+            /** Skip */
+            skip: number;
+            /** Limit */
+            limit: number;
+        };
+        /** PaginatedResponse[CouncilOut] */
+        PaginatedResponse_CouncilOut_: {
+            /** Items */
+            items: components["schemas"]["CouncilOut"][];
+            /**
+             * Total
+             * @description Total matching rows, ignoring skip/limit
+             */
+            total: number;
+            /** Skip */
+            skip: number;
+            /** Limit */
+            limit: number;
+        };
+        /** RefreshRequest */
+        RefreshRequest: {
+            /** Refresh Token */
+            refresh_token: string;
+        };
+        /**
+         * ReseedChange
+         * @description One row in the reseed diff.
+         */
+        ReseedChange: {
+            /** Council Id */
+            council_id: number;
+            /** Name */
+            name: string;
+            old: components["schemas"]["ScrapeFrequency"];
+            new: components["schemas"]["ScrapeFrequency"];
+        };
+        /**
+         * ReseedRequest
+         * @description POST /admin/councils/reseed-tiers body.
+         */
+        ReseedRequest: {
+            /**
+             * Dry Run
+             * @default true
+             */
+            dry_run: boolean;
+            /**
+             * By Name
+             * @description Optional per-council overrides applied after the volume-rank heuristic. E.g. {"South Hams": "weekly", "Westminster": "hourly"}.
+             */
+            by_name?: {
+                [key: string]: components["schemas"]["ScrapeFrequency"];
+            } | null;
+        };
+        /**
+         * ReseedResponse
+         * @description POST /admin/councils/reseed-tiers result.
+         */
+        ReseedResponse: {
+            /**
+             * Total
+             * @description Councils considered (active + inactive).
+             */
+            total: number;
+            /**
+             * By Tier
+             * @description Final tier distribution after the reseed.
+             */
+            by_tier: {
+                [key: string]: number;
+            };
+            /** Changes */
+            changes: components["schemas"]["ReseedChange"][];
+            /** Dry Run */
+            dry_run: boolean;
+        };
+        /**
+         * SavedSearchCreate
+         * @description POST /saved_searches body.
+         */
+        SavedSearchCreate: {
+            /** Name */
+            name: string;
+            /**
+             * Filters
+             * @description Opaque filter criteria — the UI persists whatever shape it uses on /applications/search (e.g. {'council_id': [21,32], 'status': ['granted'], 'received_date_from': '2026-01-01'}).
+             */
+            filters?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Is Default
+             * @default false
+             */
+            is_default: boolean;
+        };
+        /**
+         * SavedSearchOut
+         * @description Single saved-search row response.
+         */
+        SavedSearchOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * User Id
+             * Format: uuid
+             */
+            user_id: string;
+            /** Name */
+            name: string;
+            /** Filters */
+            filters: {
+                [key: string]: unknown;
+            };
+            /** Is Default */
+            is_default: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * SavedSearchUpdate
+         * @description PATCH /saved_searches/{id} body — all fields optional, server applies
+         *     a partial update for the keys that are present.
+         */
+        SavedSearchUpdate: {
+            /** Name */
+            name?: string | null;
+            /** Filters */
+            filters?: {
+                [key: string]: unknown;
+            } | null;
+            /** Is Default */
+            is_default?: boolean | null;
+        };
+        /**
+         * ScrapeFrequency
+         * @enum {string}
+         */
+        ScrapeFrequency: "hourly" | "4h" | "daily" | "weekly";
+        /**
+         * ScrapeScheduleOut
+         * @description One row from scrape_schedules — read-side.
+         */
+        ScrapeScheduleOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            tier: components["schemas"]["ScrapeFrequency"];
+            /** Cron Expression */
+            cron_expression: string;
+            /** Description */
+            description?: string | null;
+            /** Enabled */
+            enabled: boolean;
+            /** Last Applied At */
+            last_applied_at?: string | null;
+            /** Last Applied By */
+            last_applied_by?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * ScrapeScheduleUpdate
+         * @description PATCH body. Every field optional — partial update via model_dump(exclude_unset).
+         */
+        ScrapeScheduleUpdate: {
+            /** Cron Expression */
+            cron_expression?: string | null;
+            /** Description */
+            description?: string | null;
+            /** Enabled */
+            enabled?: boolean | null;
+        };
+        /**
+         * ScrapeStatus
+         * @enum {string}
+         */
+        ScrapeStatus: "success" | "partial" | "failed" | "skipped";
+        /**
+         * StatusEnum
+         * @enum {string}
+         */
+        StatusEnum: "pending" | "granted" | "refused" | "withdrawn";
+        /**
+         * TierHealthOut
+         * @description One tier's health snapshot — computed on demand from scrape_logs.
+         */
+        TierHealthOut: {
+            tier: components["schemas"]["ScrapeFrequency"];
+            /** Enabled */
+            enabled: boolean;
+            /** Cron Expression */
+            cron_expression: string;
+            /**
+             * Expected Interval Minutes
+             * @description Baseline cadence for this tier name (hourly=60, 4h=240, daily=1440, weekly=10080). Operators who edit the cron expression beyond the tier-name convention should expect this baseline to mismatch.
+             */
+            expected_interval_minutes: number;
+            /**
+             * Stale Threshold Minutes
+             * @description 2× expected_interval_minutes. Crossing this flips is_stale.
+             */
+            stale_threshold_minutes: number;
+            /** Last Success At */
+            last_success_at?: string | null;
+            /** Last Attempt At */
+            last_attempt_at?: string | null;
+            /** Minutes Since Success */
+            minutes_since_success?: number | null;
+            /**
+             * Is Stale
+             * @description True when no successful run within stale_threshold_minutes. Disabled tiers report is_stale=False — operator chose to skip them.
+             */
+            is_stale: boolean;
+        };
+        /** TokenPair */
+        TokenPair: {
+            /** Access Token */
+            access_token: string;
+            /** Refresh Token */
+            refresh_token: string;
+            /**
+             * Token Type
+             * @default bearer
+             */
+            token_type: string;
+            /**
+             * Expires In
+             * @description Access token TTL in seconds
+             */
+            expires_in: number;
+        };
+        /**
+         * UserOut
+         * @description Public user view — never includes password_hash.
+         */
+        UserOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /**
+             * Email
+             * Format: email
+             */
+            email: string;
+            /** First Name */
+            first_name?: string | null;
+            /** Last Name */
+            last_name?: string | null;
+            /** Role */
+            role: string;
+            /** Is Platform Admin */
+            is_platform_admin: boolean;
+            /** Email Verified At */
+            email_verified_at?: string | null;
+            /** Is Active */
+            is_active: boolean;
+            /** Last Login At */
+            last_login_at?: string | null;
         };
         /** ValidationError */
         ValidationError: {
@@ -133,132 +1346,6 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
-    login_page_login_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "text/html": string;
-                };
-            };
-        };
-    };
-    login_submit_login_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/x-www-form-urlencoded": components["schemas"]["Body_login_submit_login_post"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "text/html": string;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    logout_logout_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-        };
-    };
-    index__get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "text/html": string;
-                };
-            };
-        };
-    };
-    handle_query_query_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/x-www-form-urlencoded": components["schemas"]["Body_handle_query_query_post"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "text/html": string;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     health_health_get: {
         parameters: {
             query?: never;
@@ -274,7 +1361,759 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "text/html": string;
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    login_auth_login_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LoginRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TokenPair"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    refresh_auth_refresh_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RefreshRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccessTokenOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    logout_auth_logout_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RefreshRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    me_auth_me_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeResponse"];
+                };
+            };
+        };
+    };
+    list_councils_councils_get: {
+        parameters: {
+            query?: {
+                /** @description Filter by active flag. UI typically sends true. */
+                is_active?: boolean | null;
+                /** @description Repeatable: ?region=London&region=South East */
+                region?: string[] | null;
+                /** @description Repeatable: ?adapter_type=Idox&adapter_type=Tascomi */
+                adapter_type?: string[] | null;
+                skip?: number;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedResponse_CouncilOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    search_applications_applications_search_get: {
+        parameters: {
+            query?: {
+                /** @description Repeatable: ?council_id=42&council_id=99 */
+                council_id?: number[] | null;
+                /** @description Repeatable. Values: pending, granted, refused, withdrawn */
+                status?: components["schemas"]["StatusEnum"][] | null;
+                /** @description Inclusive lower bound on received_date (YYYY-MM-DD) */
+                received_date_from?: string | null;
+                /** @description Inclusive upper bound on received_date (YYYY-MM-DD) */
+                received_date_to?: string | null;
+                /** @description Postcode prefix match (case-insensitive). ?postcode=SW1 matches SW1, SW1A, SW1A 1AA... */
+                postcode?: string | null;
+                /** @description Pre-merger district name (e.g. 'Mendip', 'Allerdale'). Filters to applications classified into that former district. Only the ~32 merged unitaries' rows have this field populated; everywhere else it's NULL. See issue #61 for the full mapping. */
+                former_district?: string | null;
+                /** @description Full-text search across application description. Uses plainto_tsquery (whitespace = AND, no boolean operators). When set, results are ordered by ts_rank DESC instead of received_date. */
+                q?: string | null;
+                skip?: number;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedResponse_ApplicationOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_application_applications__application_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                application_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApplicationDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_saved_searches_saved_searches_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SavedSearchOut"][];
+                };
+            };
+        };
+    };
+    create_saved_search_saved_searches_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SavedSearchCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SavedSearchOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_saved_search_saved_searches__saved_search_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                saved_search_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SavedSearchOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_saved_search_saved_searches__saved_search_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                saved_search_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_saved_search_saved_searches__saved_search_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                saved_search_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SavedSearchUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SavedSearchOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_letters_letters_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LetterOut"][];
+                };
+            };
+        };
+    };
+    create_letter_letters_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LetterCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LetterOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_letter_templates_letter_templates_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LetterTemplateOut"][];
+                };
+            };
+        };
+    };
+    get_kanban_leads_kanban_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KanbanResponse"];
+                };
+            };
+        };
+    };
+    update_lead_leads__lead_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                lead_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LeadUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LeadOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_lead_notes_leads__lead_id__notes_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                lead_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LeadNoteOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_scrape_schedules_admin_scrape_schedules_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScrapeScheduleOut"][];
+                };
+            };
+        };
+    };
+    get_scrape_schedule_admin_scrape_schedules__tier__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tier: components["schemas"]["ScrapeFrequency"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScrapeScheduleOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_scrape_schedule_admin_scrape_schedules__tier__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tier: components["schemas"]["ScrapeFrequency"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScrapeScheduleUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScrapeScheduleOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_councils_admin_admin_councils_get: {
+        parameters: {
+            query?: {
+                /** @description Filter by tier */
+                tier?: components["schemas"]["ScrapeFrequency"] | null;
+                /** @description Repeatable region filter */
+                region?: string[] | null;
+                is_active?: boolean | null;
+                skip?: number;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedResponse_CouncilAdminOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_council_tier_admin_councils__council_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                council_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CouncilTierUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CouncilAdminOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reseed_tiers_admin_councils_reseed_tiers_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReseedRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReseedResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_scrape_health_admin_scrape_health_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HealthReportOut"];
                 };
             };
         };

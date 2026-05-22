@@ -13,7 +13,7 @@ import {
 } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
 
-import { apiFetchAuthed } from "@/lib/api/client";
+import { apiFetchAuthed, type ApiError } from "@/lib/api/client";
 
 function useToken(): string | undefined {
   const { data: session } = useSession();
@@ -198,15 +198,17 @@ export function useDeleteSavedSearch() {
 }
 
 // ── Letter templates ───────────────────────────────────────────────────
-// The backend doesn't expose GET /letter-templates yet (templates are
-// managed via the Jinja admin harness). We probe optimistically so the
-// UI lights up automatically once an endpoint is added; until then the
-// 404 surfaces a "templates unavailable" hint and a UUID-entry fallback.
+// GET /letter-templates is now implemented in the backend (api/routers/letter_templates.py).
+// The hook retries=false so a 404 (if the server is old) surfaces a graceful
+// UUID-entry fallback in TemplateSelect.
 
 export type LetterTemplate = {
   id: string;
   name: string;
-  body?: string | null;
+  body_html?: string | null;
+  merge_fields?: string[];
+  is_default: boolean;
+  created_at: string;
 };
 
 export function useLetterTemplates() {
@@ -324,19 +326,76 @@ export type LeadUpdatePayload = {
 export function useUpdateLead() {
   const token = useToken();
   const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async ({
-      id,
-      payload,
-    }: {
-      id: string;
-      payload: LeadUpdatePayload;
-    }) =>
+  return useMutation<
+    Lead,
+    ApiError,
+    { id: string; payload: LeadUpdatePayload },
+    { previousData: KanbanResponse | undefined }
+  >({
+    mutationFn: async ({ id, payload }) =>
       apiFetchAuthed<Lead>(`/leads/${id}`, token!, {
         method: "PATCH",
         body: JSON.stringify(payload),
       }),
-    onSuccess: (_data, variables) => {
+
+    onMutate: async ({ id, payload }) => {
+      // Cancel any in-flight refetches so they don't overwrite optimistic state.
+      await qc.cancelQueries({ queryKey: ["leads", "kanban"] });
+      const prev = qc.getQueryData<KanbanResponse>(["leads", "kanban"]);
+
+      if (prev && (payload.stage || payload.position !== undefined)) {
+        // Find the dragged lead across all columns.
+        let movedLead: Lead | undefined;
+        for (const col of prev.columns) {
+          movedLead = col.leads.find((l) => l.id === id);
+          if (movedLead) break;
+        }
+
+        if (movedLead) {
+          let updatedColumns: KanbanColumn[];
+
+          if (payload.stage && payload.stage !== movedLead.stage) {
+            // Cross-column move: remove from source, append to target.
+            const updated: Lead = { ...movedLead, stage: payload.stage };
+            updatedColumns = prev.columns.map((col) => {
+              if (col.stage === movedLead!.stage)
+                return { ...col, leads: col.leads.filter((l) => l.id !== id) };
+              if (col.stage === payload.stage)
+                return { ...col, leads: [...col.leads, updated] };
+              return col;
+            });
+          } else if (payload.position !== undefined) {
+            // Within-column reorder.
+            updatedColumns = prev.columns.map((col) => {
+              const fromIdx = col.leads.findIndex((l) => l.id === id);
+              if (fromIdx === -1) return col;
+              const newLeads = [...col.leads];
+              const [removed] = newLeads.splice(fromIdx, 1);
+              newLeads.splice(payload.position!, 0, removed);
+              return { ...col, leads: newLeads };
+            });
+          } else {
+            updatedColumns = prev.columns;
+          }
+
+          qc.setQueryData<KanbanResponse>(["leads", "kanban"], {
+            columns: updatedColumns,
+          });
+        }
+      }
+
+      return { previousData: prev };
+    },
+
+    onError: (_err, _vars, context) => {
+      // Roll back to the snapshot taken in onMutate.
+      if (context?.previousData !== undefined) {
+        qc.setQueryData(["leads", "kanban"], context.previousData);
+      }
+    },
+
+    onSettled: (_data, _err, variables) => {
+      // Reconcile with server after optimistic update settles.
       qc.invalidateQueries({ queryKey: ["leads", "kanban"] });
       qc.invalidateQueries({ queryKey: ["lead", variables.id] });
       qc.invalidateQueries({ queryKey: ["lead_notes", variables.id] });
