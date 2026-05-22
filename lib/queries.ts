@@ -360,3 +360,60 @@ export function useLeadNotes(leadId: string | undefined) {
     enabled: Boolean(token && leadId),
   });
 }
+
+// ── Admin (platform_admin only) ────────────────────────────────────────
+
+export type ScrapeFrequency = "hourly" | "every_4h" | "daily" | "weekly";
+export type ScrapeStatus = "success" | "failed" | "in_progress" | "cancelled";
+
+export type ScrapeSchedule = {
+  id: string;
+  tier: ScrapeFrequency;
+  cron_expression: string;
+  description?: string | null;
+  enabled: boolean;
+  last_applied_at?: string | null;
+  last_applied_by?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type TierHealth = {
+  tier: ScrapeFrequency;
+  enabled: boolean;
+  cron_expression: string;
+  expected_interval_minutes: number;
+  stale_threshold_minutes: number;
+  last_success_at?: string | null;
+  last_attempt_at?: string | null;
+  minutes_since_success?: number | null;
+  is_stale: boolean;
+};
+
+export type HealthReport = {
+  generated_at: string;
+  tiers: TierHealth[];
+  stale_count: number;
+};
+
+export function useScrapeSchedules() {
+  const token = useToken();
+  return useQuery({
+    queryKey: ["admin", "scrape_schedules"],
+    queryFn: async () =>
+      apiFetchAuthed<ScrapeSchedule[]>("/admin/scrape-schedules", token!),
+    enabled: Boolean(token),
+    retry: false,
+  });
+}
+
+export function useScrapeHealth() {
+  const token = useToken();
+  return useQuery({
+    queryKey: ["admin", "scrape_health"],
+    queryFn: async () =>
+      apiFetchAuthed<HealthReport>("/admin/scrape-health", token!),
+    enabled: Boolean(token),
+    retry: false,
+  });
+}
