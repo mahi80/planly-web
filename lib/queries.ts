@@ -476,3 +476,105 @@ export function useScrapeHealth() {
     retry: false,
   });
 }
+
+// ── Councils (full) ────────────────────────────────────────────────────
+// Richer than useCouncils() (which maps to {id,name}); the onboarding council
+// picker needs region/slug to group by region. CouncilOut carries these (V009).
+
+export type CouncilFull = {
+  id: number;
+  name: string;
+  slug?: string | null;
+  region?: string | null;
+  sub_region?: string | null;
+};
+
+export function useCouncilsFull() {
+  const token = useToken();
+  return useQuery({
+    queryKey: ["councils", "full"],
+    queryFn: async () => {
+      const data = await apiFetchAuthed<
+        { items?: CouncilFull[] } | CouncilFull[]
+      >("/councils?limit=500", token!);
+      return Array.isArray(data) ? data : data.items ?? [];
+    },
+    enabled: Boolean(token),
+    staleTime: 10 * 60 * 1000,
+  });
+}
+
+// ── Bundles + billing (onboarding / account) ────────────────────────────
+
+export type BundleCouncilRef = { id: number; name: string; slug?: string | null };
+
+export type Bundle = {
+  id: string;
+  name: string;
+  region_key: string;
+  council_count: number;
+  monthly_price_pence: number;
+  councils: BundleCouncilRef[];
+};
+
+export function useBundles() {
+  const token = useToken();
+  return useQuery({
+    queryKey: ["bundles"],
+    queryFn: async () => apiFetchAuthed<Bundle[]>("/bundles", token!),
+    enabled: Boolean(token),
+    staleTime: 10 * 60 * 1000,
+  });
+}
+
+export type SubscriptionTier = "per_council" | "bundle" | "enterprise";
+export type SubscriptionState =
+  | "trialing"
+  | "active"
+  | "past_due"
+  | "cancelled"
+  | "incomplete";
+
+export type Subscription = {
+  id: string;
+  tier: SubscriptionTier;
+  status: SubscriptionState;
+  bundle_id?: string | null;
+  monthly_price_pence: number;
+  current_period_start: string;
+  current_period_end: string;
+  councils: BundleCouncilRef[];
+};
+
+export function useSubscription() {
+  const token = useToken();
+  return useQuery({
+    queryKey: ["billing", "subscription"],
+    queryFn: async () =>
+      apiFetchAuthed<Subscription | null>("/billing/subscription", token!),
+    enabled: Boolean(token),
+    retry: false,
+  });
+}
+
+export type CheckoutPayload =
+  | { tier: "bundle"; bundle_id: string }
+  | { tier: "per_council"; council_ids: number[] }
+  | { tier: "enterprise" };
+
+export function useCheckout() {
+  const token = useToken();
+  const qc = useQueryClient();
+  return useMutation<Subscription, ApiError, CheckoutPayload>({
+    mutationFn: async (payload) =>
+      apiFetchAuthed<Subscription>("/billing/checkout", token!, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["billing", "subscription"] });
+      // Entitlement just changed -> search results depend on it.
+      qc.invalidateQueries({ queryKey: ["applications"] });
+    },
+  });
+}

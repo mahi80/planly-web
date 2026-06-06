@@ -132,6 +132,52 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/auth/signup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Signup
+         * @description Public registration. Creates a tenant + its first (tenant_admin) user,
+         *     issues an email-verification token, and auto-logs the user in.
+         *
+         *     Returns 409 if the email is already registered. Email delivery of the
+         *     verification link is out of scope here — the token is logged for now;
+         *     wire it to the mailer when available.
+         */
+        post: operations["signup_auth_signup_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/verify-email": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Verify Email
+         * @description Consume an email-verification token: mark it used + stamp
+         *     users.email_verified_at. A consumed / expired / unknown token → 400.
+         */
+        post: operations["verify_email_auth_verify_email_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/councils": {
         parameters: {
             query?: never;
@@ -147,6 +193,70 @@ export interface paths {
          *     394-row registry to populate the filter dropdown in one request.
          */
         get: operations["list_councils_councils_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/bundles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Bundles
+         * @description List active bundles, each with its councils. Two queries (bundles +
+         *     one bundle->council join) — no N+1.
+         */
+        get: operations["list_bundles_bundles_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/billing/checkout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Checkout
+         * @description STUB checkout — activates a subscription directly (no Stripe). Validates
+         *     tier rules and creates the subscription (+ subscription_councils for the
+         *     per-council tier). Real Stripe checkout + webhook replaces this later.
+         */
+        post: operations["checkout_billing_checkout_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/billing/subscription": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Subscription
+         * @description The tenant's most-recent subscription + its councils (Account screen).
+         *     Returns null if the tenant has no subscription yet.
+         */
+        get: operations["get_subscription_billing_subscription_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -578,7 +688,7 @@ export interface components {
              * Format: uuid
              */
             id: string;
-            council: components["schemas"]["CouncilRef"];
+            council: components["schemas"]["api__schemas__application__CouncilRef"];
             /** Reference Number */
             reference_number: string;
             /** Alternative Reference */
@@ -678,7 +788,7 @@ export interface components {
              * Format: uuid
              */
             id: string;
-            council: components["schemas"]["CouncilRef"];
+            council: components["schemas"]["api__schemas__application__CouncilRef"];
             /** Reference Number */
             reference_number: string;
             /** Site Address */
@@ -702,6 +812,42 @@ export interface components {
             former_district?: string | null;
             /** Former District Confidence */
             former_district_confidence?: string | null;
+        };
+        /**
+         * BundleOut
+         * @description A regional council bundle offered as a single subscription.
+         */
+        BundleOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /** Region Key */
+            region_key: string;
+            /** Council Count */
+            council_count: number;
+            /** Monthly Price Pence */
+            monthly_price_pence: number;
+            /**
+             * Councils
+             * @default []
+             */
+            councils: components["schemas"]["api__schemas__bundle__CouncilRef"][];
+        };
+        /**
+         * CheckoutRequest
+         * @description POST /billing/checkout body. per_council needs council_ids (>=3);
+         *     bundle needs bundle_id; enterprise needs neither.
+         */
+        CheckoutRequest: {
+            tier: components["schemas"]["SubscriptionTier"];
+            /** Council Ids */
+            council_ids?: number[] | null;
+            /** Bundle Id */
+            bundle_id?: string | null;
         };
         /**
          * CouncilAdminOut
@@ -745,6 +891,10 @@ export interface components {
             id: number;
             /** Name */
             name: string;
+            /** Slug */
+            slug?: string | null;
+            /** Gss Code */
+            gss_code?: string | null;
             /** Region */
             region?: string | null;
             /** Sub Region */
@@ -757,16 +907,6 @@ export interface components {
             received_apps_count: number;
             /** Last Scraped At */
             last_scraped_at?: string | null;
-        };
-        /**
-         * CouncilRef
-         * @description Compact council reference embedded in ApplicationOut / ApplicationDetail.
-         */
-        CouncilRef: {
-            /** Id */
-            id: number;
-            /** Name */
-            name: string;
         };
         /**
          * CouncilTierUpdate
@@ -902,6 +1042,25 @@ export interface components {
             note?: string | null;
         };
         /**
+         * LetterApplicationRef
+         * @description Application context flattened into a letter row for the list UI.
+         */
+        LetterApplicationRef: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Reference Number */
+            reference_number: string;
+            /** Site Address */
+            site_address?: string | null;
+            /** Council Name */
+            council_name?: string | null;
+            /** Council Slug */
+            council_slug?: string | null;
+        };
+        /**
          * LetterCreate
          * @description POST /letters body. application_id + template_id are required;
          *     both must belong to the caller's tenant or RLS rejects the insert.
@@ -959,6 +1118,9 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            application?: components["schemas"]["LetterApplicationRef"] | null;
+            /** Template Name */
+            template_name?: string | null;
         };
         /**
          * LetterStatus
@@ -1236,10 +1398,71 @@ export interface components {
          */
         ScrapeStatus: "success" | "partial" | "failed" | "skipped";
         /**
+         * SignupRequest
+         * @description Public registration — creates a tenant + its first (admin) user.
+         */
+        SignupRequest: {
+            /** Company Name */
+            company_name: string;
+            /**
+             * Email
+             * Format: email
+             */
+            email: string;
+            /** Password */
+            password: string;
+            /** First Name */
+            first_name?: string | null;
+            /** Last Name */
+            last_name?: string | null;
+        };
+        /**
          * StatusEnum
          * @enum {string}
          */
         StatusEnum: "pending" | "granted" | "refused" | "withdrawn";
+        /**
+         * SubscriptionOut
+         * @description The tenant's plan + the councils it grants (for the Account screen).
+         */
+        SubscriptionOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            tier: components["schemas"]["SubscriptionTier"];
+            status: components["schemas"]["SubscriptionStatus"];
+            /** Bundle Id */
+            bundle_id?: string | null;
+            /** Monthly Price Pence */
+            monthly_price_pence: number;
+            /**
+             * Current Period Start
+             * Format: date-time
+             */
+            current_period_start: string;
+            /**
+             * Current Period End
+             * Format: date-time
+             */
+            current_period_end: string;
+            /**
+             * Councils
+             * @default []
+             */
+            councils: components["schemas"]["api__schemas__bundle__CouncilRef"][];
+        };
+        /**
+         * SubscriptionStatus
+         * @enum {string}
+         */
+        SubscriptionStatus: "trialing" | "active" | "past_due" | "cancelled" | "incomplete";
+        /**
+         * SubscriptionTier
+         * @enum {string}
+         */
+        SubscriptionTier: "per_council" | "bundle" | "enterprise";
         /**
          * TierHealthOut
          * @description One tier's health snapshot — computed on demand from scrape_logs.
@@ -1336,6 +1559,37 @@ export interface components {
             input?: unknown;
             /** Context */
             ctx?: Record<string, never>;
+        };
+        /** VerifyEmailRequest */
+        VerifyEmailRequest: {
+            /** Token */
+            token: string;
+        };
+        /**
+         * CouncilRef
+         * @description Compact council reference embedded in ApplicationOut / ApplicationDetail.
+         */
+        api__schemas__application__CouncilRef: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Slug */
+            slug?: string | null;
+            /** Region */
+            region?: string | null;
+        };
+        /**
+         * CouncilRef
+         * @description Lightweight council reference embedded in a bundle.
+         */
+        api__schemas__bundle__CouncilRef: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Slug */
+            slug: string;
         };
     };
     responses: never;
@@ -1485,6 +1739,70 @@ export interface operations {
             };
         };
     };
+    signup_auth_signup_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SignupRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TokenPair"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    verify_email_auth_verify_email_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VerifyEmailRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_councils_councils_get: {
         parameters: {
             query?: {
@@ -1519,6 +1837,79 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_bundles_bundles_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BundleOut"][];
+                };
+            };
+        };
+    };
+    checkout_billing_checkout_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CheckoutRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubscriptionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_subscription_billing_subscription_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubscriptionOut"] | null;
                 };
             };
         };
